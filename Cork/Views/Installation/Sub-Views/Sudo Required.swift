@@ -7,13 +7,13 @@
 
 import SwiftUI
 
-struct SudoRequiredView: View
+struct SudoRequiredView: View, Sendable
 {
+    @Environment(\.dismiss) var dismiss
+    
     @EnvironmentObject var brewData: BrewDataStorage
     
     @ObservedObject var installationProgressTracker: InstallationProgressTracker
-    
-    @Binding var isShowingSheet: Bool
     
     var body: some View
     {
@@ -23,14 +23,14 @@ struct SudoRequiredView: View
             {
                 VStack(alignment: .leading, spacing: 10)
                 {
-                    Text("add-package.install.requires-sudo-password-\(installationProgressTracker.packagesBeingInstalled[0].package.name)")
+                    Text("add-package.install.requires-sudo-password-\(installationProgressTracker.packageBeingInstalled.package.name)")
                         .font(.headline)
 
                     ManualInstallInstructions(installationProgressTracker: installationProgressTracker)
                 }
             }
 
-            Text("add.package.install.requires-sudo-password.terminal-instructions-\(installationProgressTracker.packagesBeingInstalled[0].package.name)")
+            Text("add.package.install.requires-sudo-password.terminal-instructions-\(installationProgressTracker.packageBeingInstalled.package.name)")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -39,7 +39,7 @@ struct SudoRequiredView: View
             {
                 Button
                 {
-                    isShowingSheet = false
+                    dismiss()
 
                     Task.detached
                     {
@@ -71,7 +71,7 @@ private struct ManualInstallInstructions: View
     
     var manualInstallCommand: String
     {
-        return "brew install \(installationProgressTracker.packagesBeingInstalled[0].package.isCask ? "--cask" : "") \(installationProgressTracker.packagesBeingInstalled[0].package.name)"
+        return "brew install \(installationProgressTracker.packageBeingInstalled.package.isCask ? "--cask" : "") \(installationProgressTracker.packageBeingInstalled.package.name)"
     }
     
     var body: some View

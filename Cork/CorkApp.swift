@@ -20,8 +20,15 @@ struct CorkApp: App
 
     @StateObject var updateProgressTracker = UpdateProgressTracker()
     @StateObject var outdatedPackageTracker = OutdatedPackageTracker()
+    
+    @StateObject var uninstallationConfirmationTracker = UninstallationConfirmationTracker()
+
+    @AppStorage("demoActivatedAt") var demoActivatedAt: Date?
+    @AppStorage("hasValidatedEmail") var hasValidatedEmail: Bool = false
 
     @AppStorage("hasFinishedOnboarding") var hasFinishedOnboarding: Bool = false
+
+    @AppStorage("hasFinishedLicensingWorkflow") var hasFinishedLicensingWorkflow: Bool = false
 
     @Environment(\.openWindow) private var openWindow
     @AppStorage("showInMenuBar") var showInMenuBar = false
@@ -31,14 +38,12 @@ struct CorkApp: App
 
     @State private var sendStandardUpdatesAvailableNotification: Bool = true
 
-    @State private var isUninstallingOrphanedPackages: Bool = false
-    @State private var isPurgingHomebrewCache: Bool = false
-    @State private var isDeletingCachedDownloads: Bool = false
-
     @State private var brewfileContents: String = .init()
     @State private var isShowingBrewfileExporter: Bool = false
 
     @State private var isShowingBrewfileImporter: Bool = false
+    
+    @AppStorage("hasSuccessfullySubmittedOSVersion") var hasSuccessfullySubmittedOSVersion: Bool = false
 
     let backgroundUpdateTimer: NSBackgroundActivityScheduler = {
         let scheduler = NSBackgroundActivityScheduler(identifier: "com.davidbures.Cork.backgroundAutoUpdate")
@@ -52,7 +57,7 @@ struct CorkApp: App
 
     var body: some Scene
     {
-        Window("Main Window", id: "main")
+        Window("Main Window", id: .mainWindowID)
         {
             ContentView()
                 .sheet(isPresented: !$hasFinishedOnboarding, onDismiss: {
@@ -60,12 +65,19 @@ struct CorkApp: App
                 }, content: {
                     OnboardingView()
                 })
+                .sheet(isPresented: !$hasFinishedLicensingWorkflow, onDismiss: {
+                    hasFinishedLicensingWorkflow = true
+                }, content: {
+                    LicensingView()
+                        .interactiveDismissDisabled()
+                })
                 .environmentObject(appDelegate.appState)
                 .environmentObject(brewData)
                 .environmentObject(availableTaps)
                 .environmentObject(updateProgressTracker)
                 .environmentObject(outdatedPackageTracker)
                 .environmentObject(topPackagesTracker)
+                .environmentObject(uninstallationConfirmationTracker)
                 .task
                 {
                     NSWindow.allowsAutomaticWindowTabbing = false
@@ -75,46 +87,87 @@ struct CorkApp: App
                         await appDelegate.appState.setupNotifications()
                     }
                 }
+                .task // TODO: Remove this later
+                {                    
+                    if !hasSuccessfullySubmittedOSVersion
+                    {
+                        try? await submitSystemVersion()
+                    }
+                }
+                .onAppear
+                {
+                    print("Licensing state: \(appDelegate.appState.licensingState)")
+
+                    #if SELF_COMPILED
+                    AppConstants.logger.debug("Will set licensing state to Self Compiled")
+                    appDelegate.appState.licensingState = .selfCompiled
+                    
+                    #else
+                    if !hasValidatedEmail
+                    {
+                        if appDelegate.appState.licensingState != .selfCompiled
+                        {
+                            if let demoActivatedAt
+                            {
+                                let timeDemoWillRunOutAt: Date = demoActivatedAt + AppConstants.demoLengthInSeconds
+                                
+                                AppConstants.logger.debug("There is \(demoActivatedAt.timeIntervalSinceNow.formatted()) to go on the demo")
+                                
+                                AppConstants.logger.debug("Demo will time out at \(timeDemoWillRunOutAt.formatted(date: .complete, time: .complete))")
+                                
+                                if ((demoActivatedAt.timeIntervalSinceNow) + AppConstants.demoLengthInSeconds) > 0
+                                { // Check if there is still time on the demo
+                                  /// do stuff if there is
+                                }
+                                else
+                                {
+                                    hasFinishedLicensingWorkflow = false
+                                }
+                            }
+                        }
+                    }
+                    #endif
+                }
                 .onAppear
                 {
                     // Start the background update scheduler when the app starts
                     backgroundUpdateTimer.schedule
                     { (completion: NSBackgroundActivityScheduler.CompletionHandler) in
-                        print("Scheduled event fired at \(Date())")
+                        AppConstants.logger.log("Scheduled event fired at \(Date(), privacy: .auto)")
 
                         Task(priority: .background)
                         {
                             var updateResult = await shell(AppConstants.brewExecutablePath, ["update"])
 
-                            print("Update result: \(updateResult)")
+                            AppConstants.logger.debug("Update result:\nStandard output: \(updateResult.standardOutput, privacy: .public)\nStandard error: \(updateResult.standardError, privacy: .public)")
 
                             do
                             {
                                 var newOutdatedPackages = try await getListOfUpgradeablePackages(brewData: brewData)
 
-                                print("Outdated packages checker output: \(newOutdatedPackages)")
+                                AppConstants.logger.debug("Outdated packages checker output: \(newOutdatedPackages, privacy: .public)")
 
                                 defer
                                 {
-                                    print("Will purge temporary update trackers")
+                                    AppConstants.logger.log("Will purge temporary update trackers")
 
                                     updateResult = .init(standardOutput: "", standardError: "")
                                     newOutdatedPackages = .init()
                                 }
 
-                                if newOutdatedPackages.count > outdatedPackageTracker.outdatedPackages.count
+                                if newOutdatedPackages.count > outdatedPackageTracker.allOutdatedPackages.count
                                 {
-                                    print("New updates found")
+                                    AppConstants.logger.log("New updates found")
 
                                     /// Set this to `true` so the normal notification doesn't get sent
                                     sendStandardUpdatesAvailableNotification = false
 
                                     let differentPackages = newOutdatedPackages.subtracting(outdatedPackageTracker.outdatedPackages)
-                                    print("Changed packages: \(differentPackages)")
+                                    AppConstants.logger.debug("Changed packages: \(differentPackages, privacy: .auto)")
 
                                     sendNotification(title: String(localized: "notification.new-outdated-packages-found.title"), subtitle: differentPackages.map(\.package.name).formatted(.list(type: .and)))
 
-                                    outdatedPackageTracker.outdatedPackages = newOutdatedPackages
+                                    outdatedPackageTracker.allOutdatedPackages = newOutdatedPackages
 
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 1)
                                     {
@@ -123,16 +176,24 @@ struct CorkApp: App
                                 }
                                 else
                                 {
-                                    print("No new updates found")
+                                    AppConstants.logger.log("No new updates found")
                                 }
                             }
                             catch
                             {
-                                print("Something got fucked up")
+                                AppConstants.logger.error("Something got fucked up about checking for outdated packages")
                             }
                         }
 
                         completion(NSBackgroundActivityScheduler.Result.finished)
+                    }
+                }
+                .onChange(of: demoActivatedAt) // React to when the user activates the demo
+                { newValue in
+                    if let newValue
+                    { // If the demo has not been activated, `demoActivatedAt` is nil. So, when it's not nil anymore, it means the user activated it
+                        AppConstants.logger.debug("The user activated the demo at \(newValue.formatted(date: .complete, time: .complete), privacy: .public)")
+                        hasFinishedLicensingWorkflow = true
                     }
                 }
                 .onChange(of: outdatedPackageTracker.outdatedPackages.count)
@@ -153,7 +214,7 @@ struct CorkApp: App
 
                             if outdatedPackageNotificationType == .notification || outdatedPackageNotificationType == .both
                             {
-                                print("Will try to send notification")
+                                AppConstants.logger.log("Will try to send notification")
 
                                 /// This needs to be checked because when the background update system finds an update, we don't want to send this normal notification.
                                 /// Instead, we want to send a more succinct notification that includes only the new package
@@ -204,9 +265,9 @@ struct CorkApp: App
                     switch result
                     {
                     case let .success(success):
-                        print("Succeeded in exporting: \(success)")
+                        AppConstants.logger.log("Succeeded in exporting: \(success, privacy: .public)")
                     case let .failure(failure):
-                        print("Failed in exporting: \(failure)")
+                        AppConstants.logger.error("Failed in exporting: \(failure, privacy: .public)")
                     }
                 }
                 .fileImporter(
@@ -218,452 +279,350 @@ struct CorkApp: App
                     switch result
                     {
                     case let .success(success):
-                        print("Succeeded in importing: \(success)")
+                        AppConstants.logger.debug("Succeeded in importing: \(success, privacy: .public)")
                     case let .failure(failure):
-                        print("Failed in importing: \(failure)")
+                        AppConstants.logger.error("Failed in importing: \(failure, privacy: .public)")
                     }
                 }
         }
         .commands
         {
-            CommandGroup(replacing: .appInfo)
+            Group // These groups have to be here otherwise SwiftUI shits the bed. No other reason at all 🤦
             {
-                Button
+                CommandGroup(replacing: .appInfo)
                 {
-                    appDelegate.showAboutPanel()
-                } label: {
-                    Text("navigation.about")
+                    aboutMenuBarSection
                 }
-            }
-            CommandGroup(before: .help) // The "Report Bugs" section
-            {
-                Menu
+                CommandGroup(before: .help) // The "Report Bugs" section
                 {
-                    Button
-                    {
-                        NSWorkspace.shared.open(URL(string: "https://github.com/buresdv/Cork/issues/new?assignees=&labels=Bug&projects=&template=bug_report.md")!)
-                    } label: {
-                        Text("action.report-bugs.git-hub")
-                    }
-
-                    Button
-                    {
-                        let emailSubject: String = "Cork Error Report: v\(NSApplication.appVersion!)-\(NSApplication.buildVersion!)"
-                        let emailBody: String = "This is what went wrong:\n\nThis is what I expected to happen:\n\nDid Cork crash?"
-
-                        let emailService = NSSharingService(named: NSSharingService.Name.composeEmail)
-                        emailService?.recipients = ["bug-reporting@corkmac.app"]
-                        emailService?.subject = emailSubject
-                        emailService?.perform(withItems: [emailBody])
-
-                    } label: {
-                        Text("action.report-bugs.email")
-                    }
-
-                } label: {
-                    Text("action.report-bugs.menu-category")
+                    bugReportingMenuBarSection
                 }
                 
-                Button
+                CommandGroup(before: .systemServices)
                 {
-                    NSWorkspace.shared.open(URL(string: "https://feedback.corkmac.app")!)
-                } label: {
-                    Text("action.submit-feedback")
+                    onboardingMenuBarSection
                 }
-
-                Divider()
-            }
-
-            CommandGroup(before: .systemServices)
-            {
-                Button
+                
+                SidebarCommands()
+                CommandGroup(replacing: .newItem) // Disables "New Window"
+                {}
+                
+                CommandGroup(before: .sidebar)
                 {
-                    hasFinishedOnboarding = false
-                } label: {
-                    Text("onboarding.start")
-                }
-                .disabled(!hasFinishedOnboarding)
-
-                Divider()
-            }
-
-            SidebarCommands()
-            CommandGroup(replacing: .newItem) // Disables "New Window"
-            {}
-
-            CommandGroup(before: .sidebar)
-            {
-                Button
-                {
-                    appDelegate.appState.navigationSelection = nil
-                } label: {
-                    Text("action.go-to-status-page.menu-bar")
-                }
-                .disabled(appDelegate.appState.navigationSelection == nil)
-                Divider()
-            }
-
-            CommandGroup(before: .newItem)
-            {
-                Button
-                {
-                    Task(priority: .userInitiated)
-                    {
-                        do
-                        {
-                            brewfileContents = try await exportBrewfile(appState: appDelegate.appState)
-
-                            isShowingBrewfileExporter = true
-                        }
-                        catch let brewfileExportError as BrewfileDumpingError
-                        {
-                            defer
-                            {
-                                appDelegate.appState.isShowingFatalError = true
-                            }
-                            switch brewfileExportError
-                            {
-                            case .couldNotDetermineWorkingDirectory:
-                                appDelegate.appState.fatalAlertType = .couldNotGetWorkingDirectory
-
-                            case .errorWhileDumpingBrewfile:
-                                appDelegate.appState.fatalAlertType = .couldNotDumpBrewfile
-
-                            case .couldNotReadBrewfile:
-                                appDelegate.appState.fatalAlertType = .couldNotReadBrewfile
-                            }
-                        }
-                    }
-                } label: {
-                    Text("navigation.menu.import-export.export-brewfile")
-                }
-
-                Button
-                {
-                    Task(priority: .userInitiated)
-                    {
-                        do
-                        {
-                            let picker = NSOpenPanel()
-                            picker.allowsMultipleSelection = false
-                            picker.canChooseDirectories = false
-                            picker.allowedFileTypes = ["brewbak", ""]
-                            
-                            if picker.runModal() == .OK
-                            {
-                                
-                                guard let brewfileURL = picker.url else
-                                {
-                                    throw BrewfileReadingError.couldNotGetBrewfileLocation
-                                }
-                                
-                                print(brewfileURL)
-                                
-                                do
-                                {
-                                    try await importBrewfile(from: brewfileURL, appState: appDelegate.appState, brewData: brewData)
-                                }
-                                catch
-                                {
-                                    defer
-                                    {
-                                        appDelegate.appState.isShowingBrewfileImportProgress = false
-                                        appDelegate.appState.isShowingFatalError = true
-                                    }
-                                    
-                                    appDelegate.appState.fatalAlertType = .malformedBrewfile
-                                }
-                            }
-
-                        }
-                        catch let error as BrewfileReadingError
-                        {
-                            defer
-                            {
-                                appDelegate.appState.isShowingFatalError = true
-                            }
-                            switch error {
-                                case .couldNotGetBrewfileLocation:
-                                    appDelegate.appState.fatalAlertType = .couldNotGetBrewfileLocation
-                                    
-                                case .couldNotImportFile:
-                                    appDelegate.appState.fatalAlertType = .couldNotImportBrewfile
-                            }
-                        }
-                    }
-                } label: {
-                    Text("navigation.menu.import-export.import-brewfile")
+                    goToHomeScreenMenuBarSection
                 }
             }
-
-            CommandMenu("navigation.menu.packages")
+            
+            Group
             {
-                Button
+                CommandGroup(before: .newItem)
                 {
-                    appDelegate.appState.isShowingInstallationSheet.toggle()
-                } label: {
-                    Text("navigation.menu.packages.install")
+                    backupAndRestoreMenuBarSection
                 }
-                .keyboardShortcut("n")
-
-                Button
+                
+                CommandGroup(after: .newItem)
                 {
-                    appDelegate.appState.isShowingAddTapSheet.toggle()
-                } label: {
-                    Text("navigation.menu.packages.add-tap")
+                    searchMenuBarSection
                 }
-                .keyboardShortcut("n", modifiers: [.command, .option])
-
-                Divider()
-
-                Button
+                
+                CommandMenu("navigation.menu.packages")
                 {
-                    appDelegate.appState.isShowingUpdateSheet = true
-                } label: {
-                    Text("navigation.menu.packages.update")
+                    packagesMenuBarSection
                 }
-                .keyboardShortcut("r")
-
-                /* Divider()
-
-                 Button {
-                     print("Will uninstall packages")
-                 } label: {
-                     Text("Uninstall Package")
-                 }
-                  */
-            }
-
-            CommandMenu("navigation.menu.maintenance")
-            {
-                Button
+                
+                CommandMenu("navigation.menu.services")
                 {
-                    appDelegate.appState.isShowingMaintenanceSheet.toggle()
-                } label: {
-                    Text("navigation.menu.maintenance.perform")
+                    servicesMenuBarSection
                 }
-                .keyboardShortcut("m", modifiers: [.command, .shift])
-
-                if appDelegate.appState.cachedDownloadsFolderSize != 0
+                
+                CommandMenu("navigation.menu.maintenance")
                 {
-                    Button
-                    {
-                        appDelegate.appState.isShowingFastCacheDeletionMaintenanceView.toggle()
-                    } label: {
-                        Text("navigation.menu.maintenance.delete-cached-downloads")
-                    }
-                    .keyboardShortcut("m", modifiers: [.command, .option])
+                    maintenanceMenuBarSection
                 }
             }
         }
         .windowStyle(.automatic)
         .windowToolbarStyle(.automatic)
+        
+        Window("window.services", id: .servicesWindowID)
+        {
+            HomebrewServicesView()
+        }
+        .commands {
+            
+        }
+        .windowToolbarStyle(.unifiedCompact)
+        
+        Window("window.about", id: .aboutWindowID)
+        {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
 
         Settings
         {
             SettingsView()
                 .environmentObject(appDelegate.appState)
         }
+        
+        // MARK: - Menu Bar Extra
         MenuBarExtra("app-name", systemImage: outdatedPackageTracker.outdatedPackages.count == 0 ? "mug" : "mug.fill", isInserted: $showInMenuBar)
         {
-            Text("menu-bar.state-overview-\(brewData.installedFormulae.count)-\(brewData.installedCasks.count)-\(availableTaps.addedTaps.count)")
-
-            Divider()
-
-            if outdatedPackageTracker.outdatedPackages.count > 0
-            {
-                Menu
-                {
-                    ForEach(outdatedPackageTracker.outdatedPackages.sorted(by: { $0.package.installedOn! < $1.package.installedOn! }))
-                    { outdatedPackage in
-                        SanitizedPackageName(packageName: outdatedPackage.package.name, shouldShowVersion: false)
-                    }
-                } label: {
-                    Text("notification.outdated-packages-found.body-\(outdatedPackageTracker.outdatedPackages.count)")
-                }
-
-                Button("navigation.upgrade-packages")
-                {
-                    switchCorkToForeground()
-                    appDelegate.appState.isShowingUpdateSheet = true
-                }
-            }
-            else
-            {
-                Text("update-packages.no-updates.description")
-            }
-
-            Divider()
-
-            Button("navigation.install-package")
-            {
-                switchCorkToForeground()
-                appDelegate.appState.isShowingInstallationSheet.toggle()
-            }
-
-            Divider()
-
-            if !isUninstallingOrphanedPackages
-            {
-                Button("maintenance.steps.packages.uninstall-orphans")
-                {
-                    Task(priority: .userInitiated)
-                    {
-                        print("Will delete orphans")
-
-                        do
-                        {
-                            let orphanUninstallResult = try await uninstallOrphansUtility()
-
-                            sendNotification(
-                                title: String(localized: "maintenance.results.orphans-removed"),
-                                body: String(localized: "maintenance.results.orphans-count-\(orphanUninstallResult)"),
-                                sensitivity: .active
-                            )
-                        }
-                        catch let orphanUninstallationError as OrphanRemovalError
-                        {
-                            print("Failed while uninstalling orphans: \(orphanUninstallationError)")
-
-                            sendNotification(
-                                title: String(localized: "maintenance.results.orphans.failure"),
-                                body: String(localized: "maintenance.results.orphans.failure.details-\(orphanUninstallationError.localizedDescription)"),
-                                sensitivity: .active
-                            )
-                        }
-
-                        await synchronizeInstalledPackages(brewData: brewData)
-                    }
-                }
-            }
-            else
-            {
-                Text("maintenance.step.removing-orphans")
-            }
-
-            if !isPurgingHomebrewCache
-            {
-                Button("maintenance.steps.downloads.purge-cache")
-                {
-                    Task(priority: .userInitiated)
-                    {
-                        print("Will purge cache")
-
-                        isPurgingHomebrewCache = true
-
-                        defer
-                        {
-                            isPurgingHomebrewCache = false
-                        }
-
-                        do
-                        {
-                            let packagesHoldingBackCachePurge = try await purgeHomebrewCacheUtility()
-
-                            if packagesHoldingBackCachePurge.isEmpty
-                            {
-                                sendNotification(
-                                    title: String(localized: "maintenance.results.package-cache"),
-                                    sensitivity: .active
-                                )
-                            }
-                            else
-                            {
-                                sendNotification(
-                                    title: String(localized: "maintenance.results.package-cache"),
-                                    body: String(localized: "maintenance.results.package-cache.skipped-\(packagesHoldingBackCachePurge.formatted(.list(type: .and)))"),
-                                    sensitivity: .active
-                                )
-                            }
-                        }
-                        catch let cachePurgingError
-                        {
-                            print("There were errors while purging Homebrew cache: \(cachePurgingError.localizedDescription)")
-
-                            sendNotification(
-                                title: String(localized: "maintenance.results.package-cache.failure"),
-                                body: String(localized: "maintenance.results.package-cache.failure.details-\(cachePurgingError.localizedDescription)"),
-                                sensitivity: .active
-                            )
-                        }
-                    }
-                }
-            }
-            else
-            {
-                Text("maintenance.step.purging-cache")
-            }
-
-            if !isDeletingCachedDownloads
-            {
-                Button(appDelegate.appState.cachedDownloadsFolderSize != 0 ? "maintenance.steps.downloads.delete-cached-downloads" : "navigation.menu.maintenance.no-cached-downloads")
-                {
-                    print("Will delete cached downloads")
-
-                    isDeletingCachedDownloads = true
-
-                    let reclaimedSpaceAfterCachePurge = Int(appDelegate.appState.cachedDownloadsFolderSize)
-
-                    deleteCachedDownloads()
-
-                    sendNotification(
-                        title: String(localized: "maintenance.results.cached-downloads"),
-                        body: String(localized: "maintenance.results.cached-downloads.summary-\(reclaimedSpaceAfterCachePurge.formatted(.byteCount(style: .file)))"),
-                        sensitivity: .active
-                    )
-
-                    isDeletingCachedDownloads = false
-
-                    appDelegate.appState.cachedDownloadsFolderSize = directorySize(url: AppConstants.brewCachedDownloadsPath)
-                }
-                .disabled(appDelegate.appState.cachedDownloadsFolderSize == 0)
-            }
-            else
-            {
-                Text("maintenance.step.deleting-cached-downloads")
-            }
-
-            Divider()
-
-            Button("menubar.open.cork")
-            {
-                openWindow(id: "main")
-
-                switchCorkToForeground()
-            }
-
-            Divider()
-
-            Button("action.quit")
-            {
-                NSApp.terminate(self)
-            }
+            MenuBarItem()
+                .environmentObject(appDelegate.appState)
+                .environmentObject(brewData)
+                .environmentObject(availableTaps)
+                .environmentObject(outdatedPackageTracker)
         }
     }
-
-    func switchCorkToForeground()
+    
+    // MARK: - Menu Bar ViewBuilders
+    @ViewBuilder
+    var aboutMenuBarSection: some View
     {
-        if #available(macOS 14.0, *)
+        Button
         {
-            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: .aboutWindowID)
+        } label: {
+            Text("navigation.about")
         }
-        else
+    }
+    
+    @ViewBuilder
+    var bugReportingMenuBarSection: some View
+    {
+        Menu
         {
-            let runningApps: [NSRunningApplication] = NSWorkspace.shared.runningApplications
-
-            for app in runningApps
+            Button
             {
-                if app.localizedName == "Cork"
+                NSWorkspace.shared.open(URL(string: "https://github.com/buresdv/Cork/issues/new?assignees=&labels=Bug&projects=&template=bug_report.md")!)
+            } label: {
+                Text("action.report-bugs.git-hub")
+            }
+            
+            Button
+            {
+                let emailSubject: String = "Cork Error Report: v\(NSApplication.appVersion!)-\(NSApplication.buildVersion!)"
+                let emailBody: String = "This is what went wrong:\n\nThis is what I expected to happen:\n\nDid Cork crash?"
+                
+                let emailService = NSSharingService(named: NSSharingService.Name.composeEmail)
+                emailService?.recipients = ["bug-reporting@corkmac.app"]
+                emailService?.subject = emailSubject
+                emailService?.perform(withItems: [emailBody])
+                
+            } label: {
+                Text("action.report-bugs.email")
+            }
+            
+        } label: {
+            Text("action.report-bugs.menu-category")
+        }
+        
+        Button
+        {
+            NSWorkspace.shared.open(URL(string: "https://forum.corkmac.app/t/cork")!)
+        } label: {
+            Text("action.submit-feedback")
+        }
+        
+        Divider()
+    }
+    
+    @ViewBuilder
+    var onboardingMenuBarSection: some View
+    {
+        Button
+        {
+            hasFinishedOnboarding = false
+        } label: {
+            Text("onboarding.start")
+        }
+        .disabled(!hasFinishedOnboarding)
+        
+        Button
+        {
+            hasFinishedLicensingWorkflow = false
+        } label: {
+            Text("licensing.title")
+        }
+        
+        Divider()
+    }
+    
+    @ViewBuilder
+    var goToHomeScreenMenuBarSection: some View
+    {
+        Button
+        {
+            appDelegate.appState.navigationSelection = nil
+        } label: {
+            Text("action.go-to-status-page.menu-bar")
+        }
+        .disabled(appDelegate.appState.navigationSelection == nil)
+        Divider()
+    }
+    
+    @ViewBuilder
+    var backupAndRestoreMenuBarSection: some View
+    {
+        Button
+        {
+            Task(priority: .userInitiated)
+            {
+                do
                 {
-                    if !app.isActive
+                    brewfileContents = try await exportBrewfile(appState: appDelegate.appState)
+                    
+                    isShowingBrewfileExporter = true
+                }
+                catch let brewfileExportError as BrewfileDumpingError
+                {
+                    switch brewfileExportError
                     {
-                        app.activate(options: .activateIgnoringOtherApps)
+                        case .couldNotDetermineWorkingDirectory:
+                            appDelegate.appState.showAlert(errorToShow: .couldNotGetWorkingDirectory)
+                            
+                        case .errorWhileDumpingBrewfile(let error):
+                            appDelegate.appState.showAlert(errorToShow: .couldNotDumpBrewfile(error: error))
+                            
+                        case .couldNotReadBrewfile:
+                            appDelegate.appState.showAlert(errorToShow: .couldNotReadBrewfile)
                     }
                 }
             }
+        } label: {
+            Text("navigation.menu.import-export.export-brewfile")
+        }
+        
+        Button
+        {
+            Task(priority: .userInitiated)
+            {
+                do
+                {
+                    let picker = NSOpenPanel()
+                    picker.allowsMultipleSelection = false
+                    picker.canChooseDirectories = false
+                    picker.allowedFileTypes = ["brewbak", ""]
+                    
+                    if picker.runModal() == .OK
+                    {
+                        guard let brewfileURL = picker.url
+                        else
+                        {
+                            throw BrewfileReadingError.couldNotGetBrewfileLocation
+                        }
+                        
+                        AppConstants.logger.debug("\(brewfileURL.path)")
+                        
+                        do
+                        {
+                            try await importBrewfile(from: brewfileURL, appState: appDelegate.appState, brewData: brewData)
+                        }
+                        catch
+                        {
+                            appDelegate.appState.showAlert(errorToShow: .malformedBrewfile)
+                            
+                            appDelegate.appState.isShowingBrewfileImportProgress = false
+                        }
+                    }
+                }
+                catch let error as BrewfileReadingError
+                {
+                    switch error
+                    {
+                        case .couldNotGetBrewfileLocation:
+                            appDelegate.appState.showAlert(errorToShow: .couldNotGetBrewfileLocation)
+                            
+                        case .couldNotImportFile:
+                            appDelegate.appState.showAlert(errorToShow: .couldNotImportBrewfile)
+                    }
+                }
+            }
+        } label: {
+            Text("navigation.menu.import-export.import-brewfile")
         }
     }
+    
+    @ViewBuilder
+    var searchMenuBarSection: some View
+    {
+        Divider()
+        
+        Button
+        {
+            appDelegate.appState.isSearchFieldFocused = true
+        } label: {
+            Text("navigation.menu.search")
+        }
+        .keyboardShortcut("f", modifiers: .command)
+    }
+    
+    @ViewBuilder
+    var packagesMenuBarSection: some View
+    {
+        Button
+        {
+            appDelegate.appState.isShowingInstallationSheet.toggle()
+        } label: {
+            Text("navigation.menu.packages.install")
+        }
+        .keyboardShortcut("n")
+        
+        Button
+        {
+            appDelegate.appState.isShowingAddTapSheet.toggle()
+        } label: {
+            Text("navigation.menu.packages.add-tap")
+        }
+        .keyboardShortcut("n", modifiers: [.command, .option])
+        
+        Divider()
+        
+        Button
+        {
+            appDelegate.appState.isShowingUpdateSheet = true
+        } label: {
+            Text("navigation.menu.packages.update")
+        }
+        .keyboardShortcut("r")
+    }
+    
+    @ViewBuilder
+    var servicesMenuBarSection: some View
+    {
+        Button
+        {
+            openWindow(id: .servicesWindowID)
+        } label: {
+            Text("navigation.menu.services.open-window")
+        }
+        .keyboardShortcut("s", modifiers: .command)
+    }
+    
+    @ViewBuilder
+    var maintenanceMenuBarSection: some View
+    {
+        Button
+        {
+            appDelegate.appState.isShowingMaintenanceSheet.toggle()
+        } label: {
+            Text("navigation.menu.maintenance.perform")
+        }
+        .keyboardShortcut("m", modifiers: [.command, .shift])
+        
+        Button
+        {
+            appDelegate.appState.isShowingFastCacheDeletionMaintenanceView.toggle()
+        } label: {
+            Text("navigation.menu.maintenance.delete-cached-downloads")
+        }
+        .keyboardShortcut("m", modifiers: [.command, .option])
+        .disabled(appDelegate.appState.cachedDownloadsFolderSize == 0)
+    }
 
+    // MARK: - Functions
     func setAppBadge(outdatedPackageNotificationType: OutdatedPackageNotificationType)
     {
         if outdatedPackageNotificationType == .badge || outdatedPackageNotificationType == .both

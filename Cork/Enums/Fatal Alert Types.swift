@@ -9,7 +9,10 @@ import Foundation
 
 enum FatalAlertType
 {
-    case uninstallationNotPossibleDueToDependency, couldNotApplyTaggedStateToPackages, couldNotClearMetadata, metadataFolderDoesNotExist, couldNotCreateCorkMetadataDirectory, couldNotCreateCorkMetadataFile, installedPackageHasNoVersions, homePathNotSet
+    case couldNotLoadAnyPackages(Error), couldNotLoadCertainPackage(String)
+    case licenseCheckingFailedDueToAuthorizationComplexNotBeingEncodedProperly
+    case customBrewExcutableGotDeleted
+    case uninstallationNotPossibleDueToDependency(packageThatTheUserIsTryingToUninstall: BrewPackage), couldNotApplyTaggedStateToPackages, couldNotClearMetadata, metadataFolderDoesNotExist, couldNotCreateCorkMetadataDirectory, couldNotCreateCorkMetadataFile, installedPackageHasNoVersions(corruptedPackageName: String), homePathNotSet
     case couldNotObtainNotificationPermissions
 	case couldNotRemoveTapDueToPackagesFromItStillBeingInstalled
     case couldNotParseTopPackages
@@ -17,9 +20,10 @@ enum FatalAlertType
     case topPackageArrayFilterCouldNotRetrieveAnyPackages
     case couldNotAssociateAnyPackageWithProvidedPackageUUID
     case couldNotFindPackageInParentDirectory
-    case fatalPackageInstallationError
+    case fatalPackageInstallationError(String)
+    case couldNotSynchronizePackages
     
     //MARK: - Brewfile exporting/importing
-    case couldNotGetWorkingDirectory, couldNotDumpBrewfile, couldNotReadBrewfile
+    case couldNotGetWorkingDirectory, couldNotDumpBrewfile(error: String), couldNotReadBrewfile
     case couldNotGetBrewfileLocation, couldNotImportBrewfile, malformedBrewfile
 }

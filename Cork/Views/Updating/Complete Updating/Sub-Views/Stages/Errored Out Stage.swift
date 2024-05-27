@@ -41,13 +41,13 @@ struct ErroredOutStageView: View
                 HStack
                 {
                     Spacer()
-                    DismissSheetButton(isShowingSheet: $appState.isShowingUpdateSheet, customButtonText: "action.close")
+                    DismissSheetButton(customButtonText: "action.close")
                 }
             }
             .fixedSize()
             .onAppear
             {
-                print("Update errors: \(updateProgressTracker.errors)")
+                AppConstants.logger.error("Update errors: \(updateProgressTracker.errors)")
             }
         }
         .onAppear

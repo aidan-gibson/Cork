@@ -9,109 +9,106 @@ import SwiftUI
 
 struct InstallingPackageView: View
 {
+    @Environment(\.dismiss) var dismiss
+
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var brewData: BrewDataStorage
 
     @ObservedObject var installationProgressTracker: InstallationProgressTracker
-    
+
     @Binding var packageInstallationProcessStep: PackageInstallationProcessSteps
 
     @State var isShowingRealTimeOutput: Bool = false
-    
-    @Binding var isShowingSheet: Bool
 
     var body: some View
     {
         VStack(alignment: .leading)
         {
-            ForEach(installationProgressTracker.packagesBeingInstalled)
-            { packageBeingInstalled in
-
-                if packageBeingInstalled.installationStage != .finished
+            if installationProgressTracker.packageBeingInstalled.installationStage != .finished
+            {
+                ProgressView(value: installationProgressTracker.packageBeingInstalled.packageInstallationProgress, total: 10)
                 {
-                    ProgressView(value: installationProgressTracker.packagesBeingInstalled[0].packageInstallationProgress, total: 10)
+                    VStack(alignment: .leading)
                     {
-                        VStack(alignment: .leading)
+                        switch installationProgressTracker.packageBeingInstalled.installationStage
                         {
-                            switch packageBeingInstalled.installationStage
-                            {
-                                case .ready:
-                                    Text("add-package.install.ready")
+                        case .ready:
+                            Text("add-package.install.ready")
 
-                                    // FORMULAE
-                                case .loadingDependencies:
-                                    Text("add-package.install.loading-dependencies")
+                        // FORMULAE
+                        case .loadingDependencies:
+                            Text("add-package.install.loading-dependencies")
 
-                                case .fetchingDependencies:
-                                    Text("add-package.install.fetching-dependencies")
+                        case .fetchingDependencies:
+                            Text("add-package.install.fetching-dependencies")
 
-                                case .installingDependencies:
-                                    Text("add-package.install.installing-dependencies-\(installationProgressTracker.numberInLineOfPackageCurrentlyBeingInstalled)-of-\(installationProgressTracker.numberOfPackageDependencies)")
+                        case .installingDependencies:
+                            Text("add-package.install.installing-dependencies-\(installationProgressTracker.numberInLineOfPackageCurrentlyBeingInstalled)-of-\(installationProgressTracker.numberOfPackageDependencies)")
 
-                                case .installingPackage:
-                                    Text("add-package.install.installing-package")
+                        case .installingPackage:
+                            Text("add-package.install.installing-package")
 
-                                case .finished:
-                                    Text("add-package.install.finished")
+                        case .finished:
+                            Text("add-package.install.finished")
 
-                                    // CASKS
-                                case .downloadingCask:
-                                    Text("add-package.install.downloading-cask-\(installationProgressTracker.packagesBeingInstalled[0].package.name)")
+                        // CASKS
+                        case .downloadingCask:
+                            Text("add-package.install.downloading-cask-\(installationProgressTracker.packageBeingInstalled.package.name)")
 
-                                case .installingCask:
-                                    Text("add-package.install.installing-cask-\(installationProgressTracker.packagesBeingInstalled[0].package.name)")
+                        case .installingCask:
+                            Text("add-package.install.installing-cask-\(installationProgressTracker.packageBeingInstalled.package.name)")
 
-                                case .linkingCaskBinary:
-                                    Text("add-package.install.linking-cask-binary")
+                        case .linkingCaskBinary:
+                            Text("add-package.install.linking-cask-binary")
 
-                                case .movingCask:
-                                    Text("add-package.install.moving-cask-\(installationProgressTracker.packagesBeingInstalled[0].package.name)")
+                        case .movingCask:
+                            Text("add-package.install.moving-cask-\(installationProgressTracker.packageBeingInstalled.package.name)")
 
-                                case .requiresSudoPassword:
-                                    Text("add-package.install.requires-sudo-password-\(installationProgressTracker.packagesBeingInstalled[0].package.name)")
-                                        .onAppear
-                                    {
-                                        packageInstallationProcessStep = .requiresSudoPassword
-                                    }
-                            }
-                            LiveTerminalOutputView(
-                                lineArray: $installationProgressTracker.packagesBeingInstalled[0].realTimeTerminalOutput,
-                                isRealTimeTerminalOutputExpanded: $isShowingRealTimeOutput
-                            )
+                        case .requiresSudoPassword:
+                            Text("add-package.install.requires-sudo-password-\(installationProgressTracker.packageBeingInstalled.package.name)")
+                                .onAppear
+                                {
+                                    packageInstallationProcessStep = .requiresSudoPassword
+                                }
+                        case .wrongArchitecture:
+                            Text("add-package.install.wrong-architecture.title")
+                                .onAppear
+                                {
+                                    packageInstallationProcessStep = .wrongArchitecture
+                                }
                         }
-                        .fixedSize()
+                        LiveTerminalOutputView(
+                            lineArray: $installationProgressTracker.packageBeingInstalled.realTimeTerminalOutput,
+                            isRealTimeTerminalOutputExpanded: $isShowingRealTimeOutput
+                        )
                     }
-                    .animation(.none)
+                    .fixedSize()
                 }
-                else
-                { // Show this when the installation is finished
-                    Text("add-package.install.finished")
-                        .onAppear
+                .allAnimationsDisabled()
+            }
+            else
+            { // Show this when the installation is finished
+                Text("add-package.install.finished")
+                    .onAppear
                     {
                         packageInstallationProcessStep = .finished
                     }
-                }
             }
         }
         .task(priority: .userInitiated)
         {
-            for var packageToInstall in installationProgressTracker.packagesBeingInstalled
+            do
             {
-                do
-                {
-                    let installationResult = try await installPackage(installationProgressTracker: installationProgressTracker, brewData: brewData)
-                    print("Installation result: \(installationResult)")
-                }
-                catch let fatalInstallationError
-                {
-                    print("Fatal error occured during installing a package: \(fatalInstallationError)")
-                    
-                    isShowingSheet = false
-                    
-                    appState.fatalAlertDetails = fatalInstallationError.localizedDescription
-                    appState.fatalAlertType = .fatalPackageInstallationError
-                    appState.isShowingFatalError = true
-                }
+                let installationResult = try await installationProgressTracker.installPackage(using: brewData)
+                AppConstants.logger.debug("Installation result:\nStandard output: \(installationResult.standardOutput, privacy: .public)\nStandard error: \(installationResult.standardError, privacy: .public)")
+            }
+            catch let fatalInstallationError
+            {
+                AppConstants.logger.error("Fatal error occurred during installing a package: \(fatalInstallationError, privacy: .public)")
+                
+                dismiss()
+                
+                appState.showAlert(errorToShow: .fatalPackageInstallationError(fatalInstallationError.localizedDescription))
             }
         }
     }

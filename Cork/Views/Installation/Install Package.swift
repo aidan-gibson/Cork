@@ -9,7 +9,7 @@ import SwiftUI
 
 struct AddFormulaView: View
 {
-    @Binding var isShowingSheet: Bool
+    @Environment(\.dismiss) var dismiss
 
     @State private var packageRequested: String = ""
 
@@ -41,7 +41,6 @@ struct AddFormulaView: View
                 {
                     InstallationInitialView(
                         searchResultTracker: searchResultTracker,
-                        isShowingSheet: $isShowingSheet,
                         packageRequested: $packageRequested,
                         foundPackageSelection: $foundPackageSelection,
                         installationProgressTracker: installationProgressTracker,
@@ -61,7 +60,6 @@ struct AddFormulaView: View
                     searchResultTracker: searchResultTracker,
                     packageRequested: $packageRequested,
                     foundPackageSelection: $foundPackageSelection,
-                    isShowingSheet: $isShowingSheet,
                     packageInstallationProcessStep: $packageInstallationProcessStep,
                     installationProgressTracker: installationProgressTracker
                 )
@@ -69,12 +67,11 @@ struct AddFormulaView: View
             case .installing:
                 InstallingPackageView(
                     installationProgressTracker: installationProgressTracker,
-                    packageInstallationProcessStep: $packageInstallationProcessStep,
-                    isShowingSheet: $isShowingSheet
+                    packageInstallationProcessStep: $packageInstallationProcessStep
                 )
 
             case .finished:
-                DisappearableSheet(isShowingSheet: $isShowingSheet)
+                DisappearableSheet
                 {
                     ComplexWithIcon(systemName: "checkmark.seal")
                     {
@@ -100,22 +97,11 @@ struct AddFormulaView: View
                 {
                     ComplexWithIcon(systemName: "exclamationmark.triangle")
                     {
-                        if let packageBeingInstalled = installationProgressTracker.packagesBeingInstalled.first
-                        { /// Show this when we can pull out which package was being installed
-                            HeadlineWithSubheadline(
-                                headline: "add-package.fatal-error-\(packageBeingInstalled.package.name)",
-                                subheadline: "add-package.fatal-error.description",
-                                alignment: .leading
-                            )
-                        }
-                        else
-                        { /// Otherwise, show a generic error
-                            HeadlineWithSubheadline(
-                                headline: "add-package.fatal-error.generic",
-                                subheadline: "add-package.fatal-error.description",
-                                alignment: .leading
-                            )
-                        }
+                        HeadlineWithSubheadline(
+                            headline: "add-package.fatal-error-\(installationProgressTracker.packageBeingInstalled.package.name)",
+                            subheadline: "add-package.fatal-error.description",
+                            alignment: .leading
+                        )
                     }
 
                     HStack
@@ -129,12 +115,15 @@ struct AddFormulaView: View
 
                         Spacer()
 
-                        DismissSheetButton(isShowingSheet: $isShowingSheet)
+                        DismissSheetButton()
                     }
                 }
 
             case .requiresSudoPassword:
-                SudoRequiredView(installationProgressTracker: installationProgressTracker, isShowingSheet: $isShowingSheet)
+                SudoRequiredView(installationProgressTracker: installationProgressTracker)
+
+            case .wrongArchitecture:
+                WrongArchitectureView(installationProgressTracker: installationProgressTracker)
 
             case .anotherProcessAlreadyRunning:
                 VStack(alignment: .leading)
@@ -159,17 +148,18 @@ struct AddFormulaView: View
                                             try? FileManager.default.removeItem(at: lockURL)
                                         }
                                     }
-                                    
-                                    isShowingSheet.toggle()
+
+                                    dismiss()
                                 }
                                 Spacer()
-                                DismissSheetButton(isShowingSheet: $isShowingSheet)
+                                DismissSheetButton()
                             }
                         }
                     }
                 }
                 .fixedSize()
 
+                    /*
             default:
                 VStack(alignment: .leading)
                 {
@@ -186,11 +176,15 @@ struct AddFormulaView: View
                     {
                         Spacer()
 
-                        DismissSheetButton(isShowingSheet: $isShowingSheet)
+                        DismissSheetButton()
                     }
                 }
+                     */
             }
         }
         .padding()
+        .onDisappear {
+            appState.assignPackageTypeToCachedDownloads(brewData: brewData)
+        }
     }
 }

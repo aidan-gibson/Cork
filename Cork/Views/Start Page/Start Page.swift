@@ -18,7 +18,7 @@ struct StartPage: View
     @EnvironmentObject var outdatedPackageTracker: OutdatedPackageTracker
 
     @State private var isOutdatedPackageDropdownExpanded: Bool = false
-    
+
     @State private var dragOver: Bool = false
 
     var body: some View
@@ -41,9 +41,27 @@ struct StartPage: View
                                 .transition(.move(edge: .top))
                                 .animation(.easeIn, value: appState.isCheckingForPackageUpdates)
                         } header: {
-                            Text("start-page.status")
-                                .font(.title)
-                                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                            HStack(alignment: .center, spacing: 10)
+                            {
+                                Text("start-page.status")
+                                    .font(.title)
+                                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+
+                                /*
+                                 Button
+                                 {
+                                     NSWorkspace.shared.open(URL(string: "https://blog.corkmac.app/p/upcoming-changes-to-the-install-process")!)
+                                 } label: {
+                                     Text("start-page.upcoming-changes")
+                                         .padding(.horizontal, 6)
+                                         .padding(.vertical, 1)
+                                         .foregroundColor(.white)
+                                         .background(.blue)
+                                         .clipShape(.capsule)
+                                 }
+                                 .buttonStyle(.plain)
+                                  */
+                            }
                         }
 
                         Section
@@ -66,7 +84,7 @@ struct StartPage: View
                     }
                     .scrollDisabled(!isOutdatedPackageDropdownExpanded)
 
-                    ButtonBottomRow 
+                    ButtonBottomRow
                     {
                         HStack
                         {
@@ -74,7 +92,7 @@ struct StartPage: View
 
                             Button
                             {
-                                print("Would perform maintenance")
+                                AppConstants.logger.info("Would perform maintenance")
                                 appState.isShowingMaintenanceSheet.toggle()
                             } label: {
                                 Text("start-page.open-maintenance")
@@ -89,6 +107,14 @@ struct StartPage: View
             if outdatedPackageTracker.allOutdatedPackages.isEmpty
             {
                 appState.isCheckingForPackageUpdates = true
+                
+                defer
+                {
+                    withAnimation
+                    {
+                        appState.isCheckingForPackageUpdates = false
+                    }
+                }
 
                 await shell(AppConstants.brewExecutablePath, ["update"])
 
@@ -101,41 +127,63 @@ struct StartPage: View
                     switch outdatedPackageRetrievalError
                     {
                     case .homeNotSet:
-                        appState.fatalAlertType = .homePathNotSet
-                        appState.isShowingFatalError = true
+                        appState.showAlert(errorToShow: .homePathNotSet)
                     case .otherError:
-                        print("Something went wrong")
+                        AppConstants.logger.error("Something went wrong")
                     }
                 }
                 catch
                 {
-                    print("Unspecified error while pulling package updates")
-                }
-
-                withAnimation
-                {
-                    appState.isCheckingForPackageUpdates = false
+                    AppConstants.logger.error("Unspecified error while pulling package updates")
                 }
             }
         }
-        .onDrop(of: [.fileURL], isTargeted: $dragOver) { providers -> Bool in
-            providers.first?.loadDataRepresentation(forTypeIdentifier: "public.file-url", completionHandler: { (data, error) in
-                if let data = data, let path = String(data: data, encoding: .utf8), let url = URL(string: path as String) {
-                    
-                    if url.pathExtension == "brewbak" || url.pathExtension.isEmpty {
-                        print("Correct File Format")
-                        
-                        Task(priority: .userInitiated) 
+        .onDrop(of: [.fileURL], isTargeted: $dragOver)
+        { providers -> Bool in
+            providers.first?.loadDataRepresentation(forTypeIdentifier: "public.file-url", completionHandler: { data, _ in
+                if let data = data, let path = String(data: data, encoding: .utf8), let url = URL(string: path as String)
+                {
+                    if url.pathExtension == "brewbak" || url.pathExtension.isEmpty
+                    {
+                        AppConstants.logger.debug("Correct File Format")
+
+                        Task(priority: .userInitiated)
                         {
                             try await importBrewfile(from: url, appState: appState, brewData: brewData)
                         }
-                        
-                    } else {
-                        print("Incorrect file format")
+                    }
+                    else
+                    {
+                        AppConstants.logger.error("Incorrect file format")
                     }
                 }
             })
             return true
         }
+        .overlay
+        {
+            if dragOver
+            {
+                ZStack(alignment: .center)
+                {
+                    Rectangle()
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        .foregroundColor(Color(nsColor: .gridColor))
+                    
+                    VStack(alignment: .center, spacing: 10)
+                    {
+                        Image(systemName: "square.and.arrow.down")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 100)
+                        
+                        Text("navigation.menu.import-export.import-brewfile")
+                            .font(.largeTitle)
+                    }
+                    .foregroundColor(Color(nsColor: .secondaryLabelColor))
+                }
+            }
+        }
+        .animation(.easeInOut, value: dragOver)
     }
 }

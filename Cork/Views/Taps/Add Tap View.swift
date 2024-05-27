@@ -20,13 +20,11 @@ enum TapInputErrors
 enum TappingError: String
 {
     case repositoryNotFound = "Repository not found"
-    case other = "An error occured while tapping"
+    case other = "An error occurred while tapping"
 }
 
 struct AddTapView: View
 {
-    @Binding var isShowingSheet: Bool
-
     @State var progress: TapAddingStates = .ready
 
     @State private var requestedTap: String = ""
@@ -48,7 +46,6 @@ struct AddTapView: View
                 AddTapInitialView(
                     requestedTap: $requestedTap,
                     forcedRepoAddress: $forcedRepoAddress,
-                    isShowingSheet: $isShowingSheet,
                     progress: $progress,
                     isShowingManualRepoAddressInputField: false
                 )
@@ -63,15 +60,13 @@ struct AddTapView: View
 
             case .finished:
                 AddTapFinishedView(
-                    requestedTap: requestedTap,
-                    isShowingSheet: $isShowingSheet
+                    requestedTap: requestedTap
                 )
 
             case .error:
                 AddTapErrorView(
                     tappingError: tappingError,
                     requestedTap: requestedTap,
-                    isShowingSheet: $isShowingSheet,
                     progress: $progress
                 )
 
@@ -79,7 +74,6 @@ struct AddTapView: View
                 AddTapInitialView(
                     requestedTap: $requestedTap,
                     forcedRepoAddress: $forcedRepoAddress,
-                    isShowingSheet: $isShowingSheet,
                     progress: $progress,
                     isShowingManualRepoAddressInputField: true
                 )

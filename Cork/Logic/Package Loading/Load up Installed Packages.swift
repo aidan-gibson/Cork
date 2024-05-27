@@ -12,27 +12,36 @@ import Foundation
 func loadUpPackages(whatToLoad: PackageType, appState: AppState) async -> Set<BrewPackage>
 {
 
-    print("Started \(whatToLoad == .formula ? "Formula" : "Cask") loading task at \(Date())")
+    AppConstants.logger.info("Started \(whatToLoad == .formula ? "Formula" : "Cask", privacy: .public) loading task at \(Date(), privacy: .public)")
 
     var contentsOfFolder: Set<BrewPackage> = .init()
 
-    switch whatToLoad {
-        case .formula:
-            contentsOfFolder = await getContentsOfFolder(targetFolder: AppConstants.brewCellarPath, appState: appState)
-        case .cask:
-            contentsOfFolder = await getContentsOfFolder(targetFolder: AppConstants.brewCaskPath, appState: appState)
-    }
-
-    var installedPackages: Set<BrewPackage> = .init() // Empty the tracker in case there is already something in it
-
-    for package in contentsOfFolder
+    do
     {
-        installedPackages.insert(package)
+        switch whatToLoad {
+            case .formula:
+                contentsOfFolder = try await getContentsOfFolder(targetFolder: AppConstants.brewCellarPath)
+            case .cask:
+                contentsOfFolder = try await getContentsOfFolder(targetFolder: AppConstants.brewCaskPath)
+        }
+    }
+    catch let packageLoadingError as PackageLoadingError
+    {
+        switch packageLoadingError {
+            case .failedWhileLoadingPackages:
+                appState.showAlert(errorToShow: .couldNotLoadAnyPackages(packageLoadingError))
+            case .failedWhileLoadingCertainPackage(let offendingPackage):
+                appState.showAlert(errorToShow: .couldNotLoadCertainPackage(offendingPackage))
+            case .packageDoesNotHaveAnyVersionsInstalled(let offendingPackage):
+                appState.showAlert(errorToShow: .installedPackageHasNoVersions(corruptedPackageName: offendingPackage))
+        }
+    }
+    catch
+    {
+        print("Something got completely fucked up while loading packages")
     }
 
-    print("Found \(whatToLoad == .formula ? "Formulae" : "Casks"): \(installedPackages)")
+    AppConstants.logger.info("Finished \(whatToLoad == .formula ? "Formula" : "Cask", privacy: .public) loading task at \(Date(), privacy: .auto)")
 
-    print("Finished \(whatToLoad == .formula ? "Formula" : "Cask") loading task at \(Date())")
-
-    return installedPackages
+    return contentsOfFolder
 }

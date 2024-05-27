@@ -25,7 +25,6 @@ struct InstallationInitialView: View
     @State private var isTopFormulaeSectionCollapsed: Bool = false
     @State private var isTopCasksSectionCollapsed: Bool = false
 
-    @Binding var isShowingSheet: Bool
     @Binding var packageRequested: String
 
     @Binding var foundPackageSelection: Set<UUID>
@@ -34,7 +33,7 @@ struct InstallationInitialView: View
     
     @Binding var packageInstallationProcessStep: PackageInstallationProcessSteps
 
-    @FocusState var isSearchFieldFocused: Bool
+    @State var isSearchFieldFocused: Bool = true
 
     var body: some View
     {
@@ -55,24 +54,25 @@ struct InstallationInitialView: View
                 }
                 else
                 {
-                    ProgressView("Loading top packages…")
-                        .frame(minHeight: 200)
+                    if appState.failedWhileLoadingTopPackages
+                    {
+                        NoContentAvailableView(title: "add-package.error.timed-out.title", systemImage: "exclamationmark.magnifyingglass")
+                    }
+                    else
+                    {
+                        ProgressView("Loading top packages…")
+                            .frame(minHeight: 200)
+                    }
                 }
             }
-
-            TextField("add-package.search.prompt", text: $packageRequested)
-            { _ in
+            
+            InstallProcessCustomSearchField(search: $packageRequested, isFocused: $isSearchFieldFocused, customPromptText: String(localized: "add-package.search.prompt")) {
                 foundPackageSelection = Set<UUID>() // Clear all selected items when the user looks for a different package
-            }
-            .focused($isSearchFieldFocused)
-            .onAppear
-            {
-                isSearchFieldFocused.toggle()
             }
 
             HStack
             {
-                DismissSheetButton(isShowingSheet: $isShowingSheet)
+                DismissSheetButton()
 
                 Spacer()
 
@@ -80,7 +80,7 @@ struct InstallationInitialView: View
                 {
                     Button
                     {
-                        print("Would install package \(foundPackageSelection)")
+                        AppConstants.logger.debug("Would install package \(foundPackageSelection)")
                         
                         let topCasksSet = Set(topPackagesTracker.topCasks)
                         
@@ -101,22 +101,19 @@ struct InstallationInitialView: View
                         {
                             let packageToInstall: BrewPackage = try getTopPackageFromUUID(requestedPackageUUID: foundPackageSelection.first!, isCask: selectedTopPackageIsCask, topPackageTracker: topPackagesTracker)
                             
-                            installationProgressTracker.packagesBeingInstalled.append(PackageInProgressOfBeingInstalled(package: packageToInstall, installationStage: .ready, packageInstallationProgress: 0))
+                            installationProgressTracker.packageBeingInstalled = PackageInProgressOfBeingInstalled(package: packageToInstall, installationStage: .ready, packageInstallationProgress: 0)
                             
-                            print("Packages to install: \(installationProgressTracker.packagesBeingInstalled)")
-                            
-                            installationProgressTracker.packageBeingCurrentlyInstalled = packageToInstall.name
+                            AppConstants.logger.debug("Packages to install: \(installationProgressTracker.packageBeingInstalled.package.name, privacy: .public)")
                             
                             packageInstallationProcessStep = .installing
                         }
                         catch let topPackageInstallationError
                         {
-                            print("Failet while trying to get top package to install: \(topPackageInstallationError)")
+                            AppConstants.logger.error("Failed while trying to get top package to install: \(topPackageInstallationError, privacy: .public)")
                             
                             dismiss()
                             
-                            appState.fatalAlertType = .topPackageArrayFilterCouldNotRetrieveAnyPackages
-                            appState.isShowingFatalError = true
+                            appState.showAlert(errorToShow: .topPackageArrayFilterCouldNotRetrieveAnyPackages)
                             
                         }
                         

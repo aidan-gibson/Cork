@@ -19,8 +19,6 @@ struct MaintenanceReadyView: View
     @Binding var shouldDeleteDownloads: Bool
     @Binding var shouldPerformHealthCheck: Bool
 
-    @Binding var isShowingSheet: Bool
-
     @Binding var maintenanceSteps: MaintenanceSteps
 
     @State var isShowingControlButtons: Bool
@@ -76,13 +74,14 @@ struct MaintenanceReadyView: View
                 {
                     HStack
                     {
-                        DismissSheetButton(isShowingSheet: $isShowingSheet)
+                        DismissSheetButton()
 
                         Spacer()
 
                         Button
                         {
-                            print("Start")
+                            AppConstants.logger.debug("Start")
+                            
                             maintenanceSteps = .maintenanceRunning
                         } label: {
                             Text("maintenance.steps.start")

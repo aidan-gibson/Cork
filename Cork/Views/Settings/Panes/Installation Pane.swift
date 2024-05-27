@@ -8,7 +8,9 @@
 import SwiftUI
 
 struct InstallationAndUninstallationPane: View
-{    
+{
+    @AppStorage("shouldRequestPackageRemovalConfirmation") var shouldRequestPackageRemovalConfirmation: Bool = false
+
     @AppStorage("showCompatibilityWarning") var showCompatibilityWarning: Bool = true
 
     @AppStorage("showPackagesStillLeftToInstall") var showPackagesStillLeftToInstall: Bool = false
@@ -23,8 +25,10 @@ struct InstallationAndUninstallationPane: View
 
     @AppStorage("isAutomaticCleanupEnabled") var isAutomaticCleanupEnabled = true
     
+    @AppStorage("allowAdvancedHomebrewSettings") var allowAdvancedHomebrewSettings: Bool = false
+
     @EnvironmentObject var settingsState: SettingsState
-    
+
     var body: some View
     {
         SettingsPaneTemplate
@@ -60,7 +64,18 @@ struct InstallationAndUninstallationPane: View
                  }
                  */
 
-                LabeledContent {
+                LabeledContent
+                {
+                    Toggle(isOn: $shouldRequestPackageRemovalConfirmation)
+                    {
+                        Text("settings.install-uninstall.request-removal-confirmation.toggle")
+                    }
+                } label: {
+                    Text("settings.install-uninstall.package-removal.label")
+                }
+
+                LabeledContent
+                {
                     Toggle(isOn: $showCompatibilityWarning)
                     {
                         Text("settings.install-uninstall.compatibility-checking.toggle")
@@ -80,7 +95,7 @@ struct InstallationAndUninstallationPane: View
                                 Text("settings.install-uninstall.uninstallation.show-real-time-terminal-outputs")
                             }
 
-                            Toggle(isOn: $openRealTimeTerminalOutputByDefault) 
+                            Toggle(isOn: $openRealTimeTerminalOutputByDefault)
                             {
                                 Text("settings.install-uninstall.uninstallation.show-real-time-terminal-outputs.open-by-default")
                             }
@@ -110,7 +125,8 @@ struct InstallationAndUninstallationPane: View
                             .font(.caption)
                             .foregroundColor(Color(nsColor: NSColor.systemGray))
                         }
-                        
+                        .disabled(!allowAdvancedHomebrewSettings)
+
                         VStack(alignment: .leading)
                         {
                             Toggle(isOn: $isAutomaticCleanupEnabled)
@@ -125,7 +141,7 @@ struct InstallationAndUninstallationPane: View
                                     settingsState.isShowingAlert = true
                                 }
                             }
-                            
+
                             HStack(alignment: .top)
                             {
                                 Text("􀇾")
@@ -134,6 +150,7 @@ struct InstallationAndUninstallationPane: View
                             .font(.caption)
                             .foregroundColor(Color(nsColor: NSColor.systemGray))
                         }
+                        .disabled(!allowAdvancedHomebrewSettings)
                     }
                 } label: {
                     Text("settings.dangerous")

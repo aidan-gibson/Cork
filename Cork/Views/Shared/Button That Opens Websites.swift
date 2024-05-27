@@ -11,8 +11,8 @@ import SwiftUI
 
 struct ButtonThatOpensWebsites: View
 {
-    @State var websiteURL: URL
-    @State var buttonText: LocalizedStringKey
+    let websiteURL: URL
+    let buttonText: LocalizedStringKey
 
     var body: some View
     {
@@ -20,11 +20,7 @@ struct ButtonThatOpensWebsites: View
         {
             NSWorkspace.shared.open(websiteURL)
         } label: {
-            HStack(alignment: .center)
-            {
-                Text(buttonText)
-                Image(systemName: "safari")
-            }
+            Label(buttonText, systemImage: "safari")
         }
     }
 }

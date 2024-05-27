@@ -12,7 +12,6 @@ struct AddTapErrorView: View
     let tappingError: TappingError
     let requestedTap: String
     
-    @Binding var isShowingSheet: Bool
     @Binding var progress: TapAddingStates
     
     var body: some View
@@ -39,7 +38,7 @@ struct AddTapErrorView: View
 
                 HStack
                 {
-                    DismissSheetButton(isShowingSheet: $isShowingSheet)
+                    DismissSheetButton()
 
                     Spacer()
                     

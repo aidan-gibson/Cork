@@ -8,93 +8,103 @@
 import Foundation
 import SwiftyJSON
 
-
-func getContentsOfFolder(targetFolder: URL, appState: AppState) async -> Set<BrewPackage>
+enum PackageLoadingError: Error
 {
-    var contentsOfFolder: Set<BrewPackage> = .init()
+    case failedWhileLoadingPackages, failedWhileLoadingCertainPackage(String), packageDoesNotHaveAnyVersionsInstalled(String)
+}
 
-    var temporaryVersionStorage: [String] = .init()
-    var temporaryURLStorage: [URL] = .init()
-
+func getContentsOfFolder(targetFolder: URL) async throws -> Set<BrewPackage>
+{
     do
     {
-        let items = try FileManager.default.contentsOfDirectory(atPath: targetFolder.path)
-
-        for item in items
-        {
-            do
+        let items = try FileManager.default.contentsOfDirectory(atPath: targetFolder.path).filter { !$0.hasPrefix(".") }.filter { item in
+            /// Filter out all symlinks from the folder
+            let completeURLtoItem: URL = targetFolder.appendingPathComponent(item, conformingTo: .folder)
+            
+            guard let isSymlink = completeURLtoItem.isSymlink() else
             {
-                let versions = try FileManager.default.contentsOfDirectory(at: targetFolder.appendingPathComponent(item, conformingTo: .folder), includingPropertiesForKeys: [.isHiddenKey], options: .skipsHiddenFiles)
+                return false
+            }
+            
+            return !isSymlink
+        }
 
-                for version in versions
-                { // Check if what we're about to add are actual versions or just some supporting folders
-                    print("Scanned version: \(version)")
-
-                    print("Found desirable version: \(version). Appending to temporary package list")
-                    
-                    temporaryURLStorage.append(targetFolder.appendingPathComponent(item, conformingTo: .folder).appendingPathComponent(version.lastPathComponent, conformingTo: .folder))
-                    
-                    print("URL to package \(item) is \(temporaryURLStorage)")
-
-                    temporaryVersionStorage.append(version.lastPathComponent)
-                }
-
-                print("URL of this package: \(targetFolder.appendingPathComponent(item, conformingTo: .folder))")
-
-                /// What the fuck?
-                let installedOn: Date? = (try? FileManager.default.attributesOfItem(atPath: targetFolder.appendingPathComponent(item, conformingTo: .folder).path))?[.creationDate] as? Date
-
-                let folderSizeRaw: Int64? = directorySize(url: targetFolder.appendingPathComponent(item, conformingTo: .directory))
-
-                print("\n Installation date for package \(item) at path \(targetFolder.appendingPathComponent(item, conformingTo: .directory)) is \(installedOn ?? Date()) \n")
-
-                // let installedOn: Date? = try? URL(string: item)!.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-
-                if targetFolder.path.contains("Cellar")
+        let loadedPackages: Set<BrewPackage> = try await withThrowingTaskGroup(of: BrewPackage.self, returning: Set<BrewPackage>.self)
+        { taskGroup in
+            for item in items
+            {
+                taskGroup.addTask(priority: .high)
                 {
-                    /// Check if the package has any versions installed
-                    if let localPackagePath: URL = temporaryURLStorage.first
+                    do
                     {
-                        /// Find out whether the packages have been installed intentionally
-                        let localPackageInfoJSONPath: URL = localPackagePath.appendingPathComponent("INSTALL_RECEIPT.json", conformingTo: .json)
-                        async let localPackageInfoJSON: JSON = parseJSON(from: String(contentsOfFile: localPackageInfoJSONPath.path, encoding: .utf8))
-                        
-                        var wasPackageInstalledIntentionally: Bool = false
-                        if FileManager.default.fileExists(atPath: localPackageInfoJSONPath.path)
+                        var temporaryURLStorage: [URL] = .init()
+                        var temporaryVersionStorage: [String] = .init()
+
+                        let versions = try FileManager.default.contentsOfDirectory(at: targetFolder.appendingPathComponent(item, conformingTo: .folder), includingPropertiesForKeys: [.isHiddenKey], options: .skipsHiddenFiles)
+
+                        for version in versions
                         {
-                            wasPackageInstalledIntentionally = try! await localPackageInfoJSON["installed_on_request"].boolValue
+                            AppConstants.logger.debug("Scanned version: \(version)")
+
+                            AppConstants.logger.debug("Found desirable version: \(version). Appending to temporary package list")
+
+                            temporaryURLStorage.append(targetFolder.appendingPathComponent(item, conformingTo: .folder).appendingPathComponent(version.lastPathComponent, conformingTo: .folder))
+
+                            AppConstants.logger.debug("URL to package \(item) is \(temporaryURLStorage)")
+
+                            temporaryVersionStorage.append(version.lastPathComponent)
                         }
 
-                        print("Package \(item) \(wasPackageInstalledIntentionally ? "was installed intentionally" : "was not installed intentionally")")
-                        
-                        contentsOfFolder.insert(BrewPackage(name: item, isCask: false, installedOn: installedOn, versions: temporaryVersionStorage, installedIntentionally: wasPackageInstalledIntentionally, sizeInBytes: folderSizeRaw))
+                        AppConstants.logger.debug("URL of this package: \(targetFolder.appendingPathComponent(item, conformingTo: .folder))")
+
+                        let installedOn: Date? = (try? FileManager.default.attributesOfItem(atPath: targetFolder.appendingPathComponent(item, conformingTo: .folder).path))?[.creationDate] as? Date
+
+                        let folderSizeRaw: Int64? = directorySize(url: targetFolder.appendingPathComponent(item, conformingTo: .directory))
+
+                        AppConstants.logger.debug("\n Installation date for package \(item) at path \(targetFolder.appendingPathComponent(item, conformingTo: .directory)) is \(installedOn ?? Date()) \n")
+
+                        var wasPackageInstalledIntentionally = false
+                        if targetFolder.path.contains("Cellar"),
+                           let localPackagePath = temporaryURLStorage.first
+                        {
+                            let localPackageInfoJSONPath = localPackagePath.appendingPathComponent("INSTALL_RECEIPT.json", conformingTo: .json)
+                            if FileManager.default.fileExists(atPath: localPackageInfoJSONPath.path)
+                            {
+                                async let localPackageInfoJSON: JSON = parseJSON(from: String(contentsOfFile: localPackageInfoJSONPath.path, encoding: .utf8))
+                                wasPackageInstalledIntentionally = try! await localPackageInfoJSON["installed_on_request"].boolValue
+                            }
+                        }
+                        AppConstants.logger.info("Package \(item) \(wasPackageInstalledIntentionally ? "was installed intentionally" : "was not installed intentionally")")
+
+                        let foundPackage = BrewPackage(name: item, isCask: !targetFolder.path.contains("Cellar"), installedOn: installedOn, versions: temporaryVersionStorage, installedIntentionally: wasPackageInstalledIntentionally, sizeInBytes: folderSizeRaw)
+
+                        print("Successfully found and loaded \(foundPackage.isCask ? "cask" : "formula"): \(foundPackage)")
+
+                        return foundPackage
                     }
-                    else
+                    catch
                     {
-                        print("\(item) does not have any versions installed")
-                        await appState.setCorruptedPackage(item)
+                        AppConstants.logger.error("Failed while getting package version: \(error)")
+                        throw PackageLoadingError.failedWhileLoadingCertainPackage(item)
                     }
                 }
-                else
-                {
-                    contentsOfFolder.insert(BrewPackage(name: item, isCask: true, installedOn: installedOn, versions: temporaryVersionStorage, sizeInBytes: folderSizeRaw))
-                }
-
-                temporaryVersionStorage = [String]()
-                temporaryURLStorage = [URL]()
             }
-            catch let error as NSError
+
+            var loadedPackages = Set<BrewPackage>()
+            for try await package in taskGroup
             {
-                print("Failed while getting package version: \(error)")
+                loadedPackages.insert(package)
             }
+            return loadedPackages
         }
-    }
-    catch let error as NSError
-    {
-        print("Failed while accessing foldeR: \(error)")
-    }
 
-    return contentsOfFolder
+        return loadedPackages
+    }
+    catch
+    {
+        AppConstants.logger.error("Failed while accessing folder: \(error)")
+        throw error
+    }
 }
 
 func getContentsOfFolder(targetFolder: URL, options: FileManager.DirectoryEnumerationOptions? = nil) -> [URL]
@@ -114,7 +124,7 @@ func getContentsOfFolder(targetFolder: URL, options: FileManager.DirectoryEnumer
     }
     catch let folderReadingError as NSError
     {
-        print(folderReadingError.localizedDescription)
+        AppConstants.logger.error("\(folderReadingError.localizedDescription)")
     }
 
     return contentsOfFolder

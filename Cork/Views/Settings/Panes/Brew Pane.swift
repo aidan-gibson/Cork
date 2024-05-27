@@ -10,50 +10,75 @@ import SwiftUI
 
 struct BrewPane: View
 {
-    
     @AppStorage("allowBrewAnalytics") var allowBrewAnalytics: Bool = true
+    @AppStorage("allowAdvancedHomebrewSettings") var allowAdvancedHomebrewSettings: Bool = false
+
+    @EnvironmentObject var settingsState: SettingsState
+
     @State private var isPerformingBrewAnalyticsChangeCommand: Bool = false
-    
+
     var body: some View
     {
-        SettingsPaneTemplate {
-            Form
+        SettingsPaneTemplate
+        {
+            VStack(spacing: 10)
             {
-                LabeledContent {
-                    Toggle(isOn: $allowBrewAnalytics) {
-                        Text("settings.brew.collect-analytics")
+                Form
+                {
+                    LabeledContent
+                    {
+                        Toggle(isOn: $allowBrewAnalytics)
+                        {
+                            Text("settings.brew.collect-analytics")
+                        }
+                        .disabled(isPerformingBrewAnalyticsChangeCommand)
+                    } label: {
+                        Text("settings.brew.analytics")
                     }
-                    .disabled(isPerformingBrewAnalyticsChangeCommand)
-                } label: {
-                    Text("settings.brew.analytics")
+                }
+                .onChange(of: allowBrewAnalytics)
+                { newValue in
+                    if newValue == true
+                    {
+                        Task
+                        {
+                            isPerformingBrewAnalyticsChangeCommand = true
+
+                            AppConstants.logger.debug("Will ENABLE analytics")
+                            await shell(AppConstants.brewExecutablePath, ["analytics", "on"])
+
+                            isPerformingBrewAnalyticsChangeCommand = false
+                        }
+                    }
+                    else if newValue == false
+                    {
+                        Task
+                        {
+                            isPerformingBrewAnalyticsChangeCommand = true
+
+                            AppConstants.logger.debug("Will DISABLE analytics")
+                            await shell(AppConstants.brewExecutablePath, ["analytics", "off"])
+
+                            isPerformingBrewAnalyticsChangeCommand = false
+                        }
+                    }
                 }
 
-            }
-            .onChange(of: allowBrewAnalytics) { newValue in
-                if newValue == true
+                Divider()
+
+                VStack(alignment: .center)
                 {
-                    Task
-                    {
-                        isPerformingBrewAnalyticsChangeCommand = true
-                        
-                        print("Will ENABLE analytics")
-                        await shell(AppConstants.brewExecutablePath, ["analytics", "on"])
-                        
-                        isPerformingBrewAnalyticsChangeCommand = false
-                    }
+                    Toggle(isOn: $allowAdvancedHomebrewSettings, label: {
+                        Text("settings.brew.enable-advanced-settings")
+                    })
+                    .toggleStyle(.switch)
+
+                    Text("settings.brew.custom-homebrew-path.will-not-bother-me-with-support")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
                 }
-                else if newValue == false
-                {
-                    Task
-                    {
-                        isPerformingBrewAnalyticsChangeCommand = true
-                        
-                        print("Will DISABLE analytics")
-                        await shell(AppConstants.brewExecutablePath, ["analytics", "off"])
-                        
-                        isPerformingBrewAnalyticsChangeCommand = false
-                    }
-                }
+                
+                CustomHomebrewExecutableView()
             }
         }
     }

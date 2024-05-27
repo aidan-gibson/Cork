@@ -20,7 +20,6 @@ func changePackageTagStatus(package: BrewPackage, brewData: BrewDataStorage, app
             }
             return copyFormula
         }))
-
     }
     else
     {
@@ -43,7 +42,7 @@ func changePackageTagStatus(package: BrewPackage, brewData: BrewDataStorage, app
         appState.taggedPackageNames.insert(package.name)
     }
 
-    print("Tagged package with ID \(package)")
+    AppConstants.logger.debug("Tagged package with ID \(package.id, privacy: .public): \(package.name, privacy: .public)")
     
-    print("Tagged packages: \(appState.taggedPackageNames)")
+    AppConstants.logger.debug("Tagged packages: \(appState.taggedPackageNames, privacy: .public)")
 }

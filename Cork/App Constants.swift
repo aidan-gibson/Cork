@@ -8,9 +8,13 @@
 import Foundation
 import SwiftyJSON
 import UserNotifications
+import OSLog
 
 struct AppConstants
 {
+    // MARK: - Logging
+    static let logger: Logger = Logger(subsystem: "com.davidbures.cork", category: "Cork")
+    
     // MARK: - Notification stuff
     static let notificationCenter = UNUserNotificationCenter.current()
     
@@ -26,19 +30,19 @@ struct AppConstants
             switch proxyRetrievalError
             {
             case .couldNotGetProxyStatus:
-                print("Could not get proxy status")                    
+                    AppConstants.logger.warning("Could not get proxy status")                    
                 return nil
             case .couldNotGetProxyHost:
-                print("Could not get proxy host")
+                    AppConstants.logger.warning("Could not get proxy host")
                 return nil
             case .couldNotGetProxyPort:
-                print("Could not get proxy port")
+                    AppConstants.logger.warning("Could not get proxy port")
                 return nil
             }
         }
         catch let unknownError
         {
-            print("Something got fucked up")
+            AppConstants.logger.error("Something got fucked up about retrieving proxy settings")
             return nil
         }
     }()
@@ -47,13 +51,20 @@ struct AppConstants
 
     static let brewExecutablePath: URL =
     {
-        if FileManager.default.fileExists(atPath: "/opt/homebrew/bin/brew")
-        { // Apple Sillicon
-            return URL(string: "/opt/homebrew/bin/brew")!
-        }
-        else
-        { // Intel
-            return URL(string: "/usr/local/bin/brew")!
+        /// If a custom Homebrew path is defined, use it. Otherwise, use the default paths
+        if let homebrewPath = UserDefaults.standard.string(forKey: "customHomebrewPath"), !homebrewPath.isEmpty {
+            let customHomebrewPath = URL(string: homebrewPath)!
+            
+            return customHomebrewPath
+        } else {
+            if FileManager.default.fileExists(atPath: "/opt/homebrew/bin/brew")
+            { // Apple Sillicon
+                return URL(string: "/opt/homebrew/bin/brew")!
+            }
+            else
+            { // Intel
+                return URL(string: "/usr/local/bin/brew")!
+            }
         }
     }()
 
@@ -61,11 +72,11 @@ struct AppConstants
     {
         if FileManager.default.fileExists(atPath: "/opt/homebrew/Cellar")
         { // Apple Sillicon
-            return URL(string: "/opt/homebrew/Cellar")!
+            return URL(filePath: "/opt/homebrew/Cellar")
         }
         else
         { // Intel
-            return URL(string: "/usr/local/Cellar")!
+            return URL(filePath: "/usr/local/Cellar")
         }
     }()
 
@@ -73,11 +84,11 @@ struct AppConstants
     {
         if FileManager.default.fileExists(atPath: "/opt/homebrew/Caskroom")
         { // Apple Sillicon
-            return URL(string: "/opt/homebrew/Caskroom")!
+            return URL(filePath: "/opt/homebrew/Caskroom")
         }
         else
         { // Intel
-            return URL(string: "/usr/local/Caskroom")!
+            return URL(filePath: "/usr/local/Caskroom")
         }
     }()
 
@@ -85,11 +96,11 @@ struct AppConstants
     {
         if FileManager.default.fileExists(atPath: "/opt/homebrew/Library/Taps")
         { // Apple Sillicon
-            return URL(string: "/opt/homebrew/Library/Taps")!
+            return URL(filePath: "/opt/homebrew/Library/Taps")
         }
         else
         { // Intel
-            return URL(string: "/usr/local/Homebrew/Library/Taps")!
+            return URL(filePath: "/usr/local/Homebrew/Library/Taps")
         }
     }()
 
@@ -100,7 +111,7 @@ struct AppConstants
 
     // MARK: - Brew Cache
 
-    static let brewCachePath: URL = URL(string: NSSearchPathForDirectoriesInDomains(.libraryDirectory, .userDomainMask, true).first!)!.appendingPathComponent("Caches", conformingTo: .directory).appendingPathComponent("Homebrew", conformingTo: .directory) // /Users/david/Library/Caches/Homebrew
+    static let brewCachePath: URL = URL.libraryDirectory.appendingPathComponent("Caches", conformingTo: .directory).appendingPathComponent("Homebrew", conformingTo: .directory) // /Users/david/Library/Caches/Homebrew
 
     /// These two have the symlinks to the actual downloads
     static let brewCachedFormulaeDownloadsPath: URL = brewCachePath
@@ -108,6 +119,15 @@ struct AppConstants
 
     /// This one has all the downloaded files themselves
     static let brewCachedDownloadsPath: URL = brewCachePath.appendingPathComponent("downloads", conformingTo: .directory)
+    
+    // MARK: - Licensing
+    static let demoLengthInSeconds: Double = 604800 // 7 days
+    
+    static let authorizationEndpointURL: URL = URL(string: "https://automation.tomoserver.eu/webhook/38aacca6-5da8-453c-a001-804b15751319")!
+    static let licensingAuthorization: (username: String, passphrase: String) = ("cork-authorization", "choosy-defame-neon-resume-cahoots")
+    
+    // MARK: - Temporary OS version submission
+    static let osSubmissionEndpointURL: URL = URL(string: "https://automation.tomoserver.eu/webhook/3a971576-fa96-479e-9dc4-e052fe33270b")!
     
     // MARK: - Misc Stuff
     static let backgroundUpdateInterval: TimeInterval = 10 * 60
