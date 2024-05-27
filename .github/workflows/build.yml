@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Xcodebuild
-        run: xcodebuild -project Cork.xcodeproj -scheme Self-Compiled -destination platform=macOS build -derivedDataPath ./build
+        run: xcodebuild -project Cork.xcodeproj -scheme Self-Compiled -destination platform=macOS build -derivedDataPath ./build -xcconfig Config.xcconfig
 
       # - name: Notarize Release Build
       #   uses: lando/notarize-action@v2
