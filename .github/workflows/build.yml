@@ -44,6 +44,9 @@ jobs:
       # - name: Create zip file
       #   run: cp -r build/Build/Products/Debug/Cork.app . && zip -r Cork.zip Cork.app
 
+      - name: Test
+        run: ls
+
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
