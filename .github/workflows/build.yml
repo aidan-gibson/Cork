@@ -36,10 +36,10 @@ jobs:
       #     appstore-connect-team-id: ${{ secrets.PROD_MACOS_NOTARIZATION_TEAM_ID }}
       #     verbose: true
 
-      - name: "Staple Release Build"
-        uses: BoundfoxStudios/action-xcode-staple@v1
-        with:
-          product-path: "build/Build/Products/Debug/Cork.app"
+      # - name: "Staple Release Build"
+      #   uses: BoundfoxStudios/action-xcode-staple@v1
+      #   with:
+      #     product-path: "build/Build/Products/Debug/Cork.app"
       
       - name: Create zip file
         run: cp -r build/Build/Products/Debug/Cork.app . && zip -r Cork.zip Cork.app
