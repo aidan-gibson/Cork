@@ -45,9 +45,12 @@ jobs:
       #   run: cp -r build/Build/Products/Debug/Cork.app . && zip -r Cork.zip Cork.app
 
       - name: Test
-        run: ls
+        run: file build/Build/Products/Self-Compiled/Cork.app
+
+      - name: cp
+        run: cp build/Build/Products/Self-Compiled/Cork.app Cork.app
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
-          file: build/Build/Products/Self-Compiled/Cork.app
+          file: Cork.app
