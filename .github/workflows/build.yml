@@ -41,10 +41,10 @@ jobs:
       #   with:
       #     product-path: "build/Build/Products/Debug/Cork.app"
       
-      - name: Create zip file
-        run: cp -r build/Build/Products/Debug/Cork.app . && zip -r Cork.zip Cork.app
+      # - name: Create zip file
+      #   run: cp -r build/Build/Products/Debug/Cork.app . && zip -r Cork.zip Cork.app
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
-          file: Cork.zip
+          file: /Users/runner/work/Cork/Cork/build/Build/Products/Self-Compiled/Cork.app
